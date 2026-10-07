@@ -1199,7 +1199,35 @@
   <script>
     "use strict";
 
-    /* ===== utils ===== */
+    /* =====================================================================
+       PURR'COFFEE POS  -  script map
+       ---------------------------------------------------------------------
+       1. SETTINGS        numbers you may want to change (prices, limits)
+       2. HELPERS         icons, money format, dates, toast popup
+       3. MENU DATA       products, categories, product drawings
+       4. CART            current order (add / remove / totals)
+       5. TRANSACTIONS    reference numbers + saved sales history
+       6. PAYMENT         cash validation
+       7. RECEIPT         receipt HTML
+       8. SCREENS         one function per screen (v_order, v_cash, ...)
+       9. ACTIONS         what each button does (click handler)
+      10. START           boot the app
+       ===================================================================== */
+
+    /* ===== 1. SETTINGS ===== */
+    const CONFIG = {
+      LARGE_EXTRA: 20,          // extra pesos for a Large drink
+      MAX_QTY: 20,              // max quantity per add on the menu
+      PROCESS_MS: 1600,         // fake processing time for QR / Card
+      MAX_CASH_DIGITS: 7,       // max digits on the cash keypad
+      QUICK_AMOUNTS: [200, 500, 1000], // quick cash buttons (plus "Exact")
+      TOAST_MS: 2400,           // how long popups stay
+      STORAGE_KEY: "pos_tx"     // localStorage key for the reference counter
+    };
+    const LARGE_EXTRA = CONFIG.LARGE_EXTRA;
+
+
+    /* ===== 2. HELPERS (icons, money, dates, toast popup) ===== */
     const ICONS = {
       cup: "M4 8h13v8a4 4 0 01-4 4H8a4 4 0 01-4-4V8zM17 10h1a3 3 0 010 6h-1M8 2v3M12 2v3",
       menu: "M4 6h16M4 12h16M4 18h16",
@@ -1226,7 +1254,7 @@
     };
     const ic = n => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[n]}"/></svg>`;
     const Util = {
-      cents: n => Math.round(Number(n) * 100),
+      cents: n => Math.round(Number(n) * 100), // money in centavos: no decimal errors
       peso: n => "₱" + Number(n).toLocaleString("en-PH", {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
@@ -1238,12 +1266,11 @@
         e.innerHTML = ic(type === "success" ? "check" : "alert") + `<span>${t}</span>`;
         e.className = "show " + type;
         clearTimeout(Util._t);
-        Util._t = setTimeout(() => e.className = "", 2400);
+        Util._t = setTimeout(() => e.className = "", CONFIG.TOAST_MS);
       }
     };
 
-    /* ===== product data + drawn product images (inline SVG, no external files) ===== */
-    const LARGE_EXTRA = 20;
+    /* ===== 3. MENU DATA (products, categories, drawn images - no image files needed) ===== */
     const PRODUCTS = [
       {
         id: 1,
@@ -1363,7 +1390,7 @@
       return `<svg viewBox="0 0 100 100" role="img" aria-label="${p.name}">${B[p.art]()}</svg>`;
     }
 
-    /* ===== cart logic (temporary order state; lines keyed by product + size) ===== */
+    /* ===== 4. CART (current order; each line is keyed by product + size) ===== */
     const Cart = {
       items: [],
       find(k) {
@@ -1387,7 +1414,7 @@
         const e = this.find(k);
         if (!e)
           return;
-        e.quantity + d < 1 ? this.remove(k) : e.quantity += d;
+        e.quantity + d < 1 ? this.remove(k) : e.quantity += d; // never below 1
       },
       remove(k) {
         this.items = this.items.filter(i => i.key !== k);
@@ -1395,7 +1422,7 @@
       clear() {
         this.items = [];
       },
-      subtotal: i => Util.cents(i.price) * i.quantity / 100,
+      subtotal: i => Util.cents(i.price) * i.quantity / 100, // derived, never stored
       totalCents() {
         return this.items.reduce((s, i) => s + Util.cents(i.price) * i.quantity, 0);
       },
@@ -1410,14 +1437,14 @@
       }
     };
 
-    /* ===== transaction logic (separate from cart) ===== */
+    /* ===== 5. TRANSACTIONS (reference numbers + sales history) ===== */
     const Tx = {
       seq: 0,
       used: new Set(),
       history: [],
       init() {
         try {
-          const s = JSON.parse(localStorage.getItem("pos_tx") || "{}");
+          const s = JSON.parse(localStorage.getItem(CONFIG.STORAGE_KEY) || "{}");
           if (s.day === Util.ymd(new Date())) {
             this.seq = s.seq || 0;
             (s.used || []).forEach(r => this.used.add(r));
@@ -1436,7 +1463,7 @@
         } while (this.used.has(r));
         this.used.add(r);
         try {
-          localStorage.setItem("pos_tx", JSON.stringify({
+          localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({
             day: Util.ymd(new Date()),
             seq: this.seq,
             used: [...this.used]
@@ -1453,7 +1480,7 @@
           transactionReference: this.newRef(),
           dateTime: new Date(),
           serviceMode: mode,
-          items: Cart.items.map(i => ({
+          items: Cart.items.map(i => ({ // snapshot: later cart changes cannot alter it
             name: i.name,
             size: i.size,
             price: i.price,
@@ -1471,7 +1498,7 @@
       }
     };
 
-    /* ===== payment logic ===== */
+    /* ===== 6. PAYMENT (cash validation) ===== */
     const Payment = { check(s) {
         if (!/^\d{1,7}$/.test(s) || Number(s) <= 0)
           return { error: "invalid" };
@@ -1485,7 +1512,7 @@
         };
       } };
 
-    /* ===== receipt generation ===== */
+    /* ===== 7. RECEIPT ===== */
     const Receipt = { html(t) {
         const rows = t.items.map(i => `<div class="r"><b>${i.name}${i.size ? ` (${i.size})` : ""}</b><span>${Util.peso(i.subtotal)}</span></div><small>${i.quantity} × ${Util.peso(i.price)}</small>`).join("");
         const cash = t.paymentMethod === "Cash" ? `<div class="r"><span>Cash received</span><span>${Util.peso(t.cashReceived)}</span></div><div class="r"><span>Change</span><span>${Util.peso(t.change)}</span></div>` : "";
@@ -1498,7 +1525,7 @@
       <div class="r"><span>Status</span><span class="okk">Payment Successful</span></div><hr><div class="c">Thank you! Come back soon.</div></div>`;
       } };
 
-    /* ===== UI ===== */
+    /* ===== 8. SCREENS + APP STATE (step numbers, state, render, one v_ function per screen) ===== */
     const STEP = {
       order: 1,
       review: 2,
@@ -1520,6 +1547,7 @@
       from: "success",
       cashStr: "",
       processing: false,
+      // go to another screen and redraw
       go(s) {
         this.screen = s;
         this.render();
@@ -1531,6 +1559,7 @@
           qty: 1
         });
       },
+      // redraw sidebar, top bar and main area
       render() {
         const n = STEP[this.screen];
         document.getElementById("side").innerHTML = `<div class="brand">${ic("cup")}Purr'Coffee</div>
@@ -1597,7 +1626,7 @@
         return `<div class="two"><div><h2>${ic("cash")} Cash Payment</h2><div class="amt"><span>Total amount</span><b>${Util.peso(Cart.total())}</b></div><span class="lbl">Amount paid</span>
       <div class="field ${bad ? "bad" : ""} ${s ? "" : "z"}">${Util.peso(amt)}</div>
       ${bad ? `<div class="alert">${ic("alert")}<div><b>Insufficient cash.</b>Please enter an amount equal to or greater than the total. You are short by ${Util.peso(r.short)}.</div></div>` : ""}
-      <span class="lbl" style="color:var(--mute)">Quick amounts</span><div class="quick"><button data-a="quick" data-v="${Cart.total()}" class="${s && amt === Math.ceil(Cart.total()) ? "on" : ""}">Exact</button>${[200, 500, 1000].map(v => `<button data-a="quick" data-v="${v}" class="${s && amt === v ? "on" : ""}">₱${v.toLocaleString()}</button>`).join("")}</div>
+      <span class="lbl" style="color:var(--mute)">Quick amounts</span><div class="quick"><button data-a="quick" data-v="${Cart.total()}" class="${s && amt === Math.ceil(Cart.total()) ? "on" : ""}">Exact</button>${CONFIG.QUICK_AMOUNTS.map(v => `<button data-a="quick" data-v="${v}" class="${s && amt === v ? "on" : ""}">₱${v.toLocaleString()}</button>`).join("")}</div>
       <div class="chg ${ok ? "ok" : ""}"><div>Change${ok ? `<small>${Util.peso(amt)} − ${Util.peso(Cart.total())}</small>` : ""}</div><b>${ok ? Util.peso(r.change) : "—"}</b></div></div>
       <div><div class="pad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(d => `<button data-a="key" data-k="${d}">${d}</button>`).join("")}<button class="f" data-a="kclear">Clear</button><button data-a="key" data-k="0">0</button><button class="f" data-a="kback" aria-label="Backspace">${ic("back")}</button></div>
       <button class="wide pri" style="margin-top:12px" data-a="payCash">Pay Now</button><button class="wide out" data-a="toMethod">${ic("left")} Change payment method</button></div></div>`;
@@ -1634,7 +1663,7 @@
         const h = Tx.history;
         return `<h1>History</h1><p class="sub">Completed transactions this session.</p><div class="hist">${h.length ? h.map((t, i) => `<button data-a="open" data-i="${i}"><span>${t.transactionReference}<br><small style="color:var(--mute)">${t.dateTime.toLocaleTimeString("en-PH", { timeStyle: "short" })} · ${t.paymentMethod} · ${t.serviceMode}</small></span><b>${Util.peso(t.total)}</b></button>`).join("") : `<div class="empty">No transactions yet.</div>`}</div>`;
       },
-      /* --- actions --- */
+      /* ===== 9. ACTIONS (guard, finish payment, new transaction, click handler) ===== */
       guard() {
         if (Cart.isEmpty()) {
           Util.toast("Please add at least one product before proceeding.", "warn");
@@ -1647,7 +1676,7 @@
           return;
         if (!this.guard())
           return this.go("order");
-        const d = method === "Cash" ? 0 : 1600;
+        const d = method === "Cash" ? 0 : CONFIG.PROCESS_MS;
         this.processing = d > 0;
         this.render();
         setTimeout(() => {
@@ -1676,12 +1705,14 @@
         Util.toast("New transaction started — previous order cleared");
         this.go("order");
       },
+      // one click listener for the whole page; buttons carry data-a="action"
       handle(e) {
         const b = e.target.closest("[data-a]");
         if (!b || this.processing)
           return;
         const id = Number(b.dataset.id), k = b.dataset.k;
         switch (b.dataset.a) {
+          /* --- menu --- */
           case "cat":
             this.cat = b.dataset.c;
             this.q = "";
@@ -1693,7 +1724,7 @@
             break;
           case "qp": {
             const v = this.getSel(id);
-            if (v.qty < 20)
+            if (v.qty < CONFIG.MAX_QTY)
               v.qty++;
             this.refreshGrid();
             break;
@@ -1734,6 +1765,7 @@
             this.render();
             Util.toast("Item removed.", "warn");
             break;
+          /* --- navigation --- */
           case "toOrder":
             this.go("order");
             break;
@@ -1753,12 +1785,13 @@
             this.from = "history";
             this.go("receipt");
             break;
+          /* --- payment: choose method + cash keypad --- */
           case "pick":
             this.cashStr = "";
             this.go(b.dataset.m === "Cash" ? "cash" : b.dataset.m === "Card" ? "card" : "qr");
             break;
           case "key":
-            if (this.cashStr.length < 7) {
+            if (this.cashStr.length < CONFIG.MAX_CASH_DIGITS) {
               this.cashStr = (this.cashStr + b.dataset.k).replace(/^0+/, "");
               this.render();
             }
@@ -1775,6 +1808,7 @@
             this.cashStr = String(Math.ceil(Number(b.dataset.v)));
             this.render();
             break;
+          /* --- pay + receipt --- */
           case "payCash": {
             const r = this.cashStr ? Payment.check(this.cashStr) : { error: "invalid" };
             if (r.error === "invalid")
@@ -1815,9 +1849,10 @@
         g ? g.innerHTML = this.gridHtml() : this.render();
       }
     };
-    Tx.init();
+    /* ===== 10. START ===== */
+    Tx.init();                                            // load today's reference counter
     document.addEventListener("click", e => App.handle(e));
-    App.render();
+    App.render();                                         // draw the first screen
   </script>
 </body>
 </html>
