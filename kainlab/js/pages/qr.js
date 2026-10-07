@@ -14,10 +14,7 @@ const QrPage = {
         <div class="qrcard">
           <div>
             <div class="qrbox">
-              <i style="top:8%;left:8%"></i>
-              <i style="top:8%;right:8%"></i>
-              <i style="bottom:8%;left:8%"></i>
-              <div>QR CODE<br /><small>placeholder</small></div>
+              <img src="assets/qr-code.png" alt="Payment QR code" />
             </div>
             <div class="note">Ref: QR-${Tx.peekRef()}</div>
           </div>
